@@ -31,21 +31,21 @@ def _register_korean_font():
     if _FONT_REGISTERED:
         return
 
-    # Windows 한국어 폰트 경로
+    # 프로젝트 내 fonts 폴더 (Railway 서버에서도 동작)
+    base_dir = Path(__file__).resolve().parent.parent.parent
     font_candidates = [
-        "C:/Windows/Fonts/malgun.ttf",       # 맑은 고딕
-        "C:/Windows/Fonts/gulim.ttc",         # 굴림
-        "C:/Windows/Fonts/batang.ttc",        # 바탕
-        "C:/Windows/Fonts/NanumGothic.ttf",   # 나눔고딕 (설치된 경우)
+        base_dir / "fonts" / "NanumGothic.ttf",
+        base_dir / "fonts" / "NanumGothicBold.ttf",
+        # Windows fallback
+        Path("C:/Windows/Fonts/malgun.ttf"),
         # Linux fallback
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
     ]
 
     for path in font_candidates:
-        if Path(path).exists():
+        if path.exists():
             try:
-                pdfmetrics.registerFont(TTFont("KoreanFont", path))
+                pdfmetrics.registerFont(TTFont("KoreanFont", str(path)))
                 _FONT_REGISTERED = True
                 return
             except:
@@ -91,11 +91,9 @@ def _get_styles() -> dict:
 
 
 def _highlight_emphasis(text: str, style: ParagraphStyle) -> list:
-    """Split text into Paragraphs, coloring emphasis phrases red."""
     pattern = "(" + "|".join(re.escape(p) for p in EMPHASIS_PHRASES) + ")"
     segments = re.split(pattern, text)
 
-    base = "KoreanFont" if _FONT_REGISTERED else "Helvetica"
     paragraphs = []
     current = ""
     for seg in segments:
