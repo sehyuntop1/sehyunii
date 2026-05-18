@@ -1,7 +1,6 @@
 import asyncio
 import os
 import time
-from pathlib import Path
 
 from telegram import Update, Document
 from telegram.ext import (
@@ -14,12 +13,12 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN, UPLOAD_DIR, OUTPUT_DIR
-from src.ai.script_refiner import refine_script
+from src.ai.script_validator import validate_script_match
 from src.mapping.page_mapper import map_script_to_pages, generate_page_summary
 from src.pdf.slide_extractor import extract_slide_texts
 from src.pdf.pdf_generator import generate_pdf
 
-WAIT_PDF, WAIT_SCRIPT = range(2)
+WAIT_PDF, WAIT_SCRIPT, WAIT_CONFIRM = range(3)
 
 user_sessions: dict[int, dict] = {}
 
@@ -50,8 +49,7 @@ async def receive_pdf(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ PDF 수신 완료! ({document.file_name})\n\n"
         "이제 교수님의 강의 대본 텍스트를 붙여넣어 주세요.\n"
-        "또는 대본 텍스트 파일(.txt)을 전송해도 됩니다.\n"
-        "(슬라이드 전환 표시가 있다면 [슬라이드 N] 형태로 포함해 주시면 더 정확합니다)"
+        "또는 대본 텍스트 파일(.txt)을 전송해도 됩니다."
     )
     return WAIT_SCRIPT
 
@@ -78,39 +76,97 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text(
         "⏳ 처리 중입니다...\n"
-        "1/4 슬라이드별 대본 다듬는 중..."
+        "1/3 슬라이드 텍스트 추출 중..."
     )
 
     try:
-        # 1단계: 대본 다듬기
-        refined = await refine_script(raw_script)
-        await status_msg.edit_text(
-            "⏳ 처리 중입니다...\n"
-            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
-            "2/4 슬라이드 텍스트 추출 중..."
-        )
-
-        # 2단계: 슬라이드 추출
+        # 1단계: 슬라이드 추출
         slide_texts = extract_slide_texts(pdf_path)
         total_pages = len(slide_texts)
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
-            f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
-            "3/4 대본-슬라이드 매핑 중 (Gemini)..."
+            f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
+            "2/3 대본-슬라이드 일치 확인 중..."
         )
 
-        # 3단계: 매핑
-        mappings = await map_script_to_pages(slide_texts, refined)
+        # 2단계: 대본 일치 확인
+        is_match, reason = await validate_script_match(slide_texts, raw_script)
+
+        if not is_match:
+            # 불일치 시 경고 후 계속할지 물어봄
+            user_sessions[user_id].update({
+                "raw_script": raw_script,
+                "slide_texts": slide_texts,
+                "total_pages": total_pages,
+                "status_msg_id": status_msg.message_id,
+            })
+            await status_msg.edit_text(
+                f"⚠️ 슬라이드와 대본이 다른 강의일 수 있습니다.\n"
+                f"사유: {reason}\n\n"
+                "그래도 계속 진행할까요?\n"
+                "계속하려면 /continue, 취소하려면 /cancel"
+            )
+            return WAIT_CONFIRM
+
+        # 일치하면 바로 다음 단계
+        user_sessions[user_id].update({
+            "raw_script": raw_script,
+            "slide_texts": slide_texts,
+            "total_pages": total_pages,
+        })
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
-            f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
-            "✅ 3/4 대본-슬라이드 매핑 완료\n"
-            f"4/4 AI 요약 생성 중... (0/{total_pages}페이지)"
+            f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
+            "✅ 2/3 대본-슬라이드 일치 확인 완료\n"
+            "3/3 대본-슬라이드 매핑 중 (Gemini)..."
         )
 
-        # 4단계: 10페이지씩 나눠서 요약 (timeout 방지)
+        await process_mapping(update, ctx, user_id, status_msg)
+
+    except Exception as e:
+        await status_msg.edit_text(f"오류가 발생했습니다: {str(e)}\n/start로 다시 시도해 주세요.")
+        return ConversationHandler.END
+
+    return ConversationHandler.END
+
+
+async def continue_anyway(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in user_sessions:
+        await update.message.reply_text("세션이 만료됐습니다. /start로 다시 시작해주세요.")
+        return ConversationHandler.END
+
+    status_msg = await update.message.reply_text(
+        "⏳ 처리 중입니다...\n"
+        "✅ 슬라이드 추출 완료\n"
+        "✅ 일치 확인 (경고 무시)\n"
+        "대본-슬라이드 매핑 중 (Gemini)..."
+    )
+    user_sessions[user_id]["status_msg_id"] = status_msg.message_id
+
+    await process_mapping(update, ctx, user_id, status_msg)
+    return ConversationHandler.END
+
+
+async def process_mapping(update, ctx, user_id, status_msg):
+    session = user_sessions[user_id]
+    raw_script = session["raw_script"]
+    slide_texts = session["slide_texts"]
+    total_pages = session["total_pages"]
+    pdf_path = session["pdf_path"]
+
+    try:
+        # 매핑
+        mappings = await map_script_to_pages(slide_texts, raw_script)
+        await status_msg.edit_text(
+            "⏳ 처리 중입니다...\n"
+            f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
+            "✅ 대본-슬라이드 매핑 완료\n"
+            f"AI 요약 생성 중... (0/{total_pages}페이지)"
+        )
+
+        # 요약 생성
         summaries = []
         BATCH_SIZE = 10
 
@@ -130,19 +186,17 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await status_msg.edit_text(
                 "⏳ 처리 중입니다...\n"
-                "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
-                f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
-                "✅ 3/4 대본-슬라이드 매핑 완료\n"
-                f"4/4 AI 요약 생성 중... ({batch_end}/{total_pages}페이지 완료)"
+                f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
+                "✅ 대본-슬라이드 매핑 완료\n"
+                f"AI 요약 생성 중... ({batch_end}/{total_pages}페이지 완료)"
             )
 
-        # 5단계: PDF 생성
+        # PDF 생성
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
-            f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
-            "✅ 3/4 대본-슬라이드 매핑 완료\n"
-            f"✅ 4/4 AI 요약 {total_pages}페이지 완료\n"
+            f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
+            "✅ 대본-슬라이드 매핑 완료\n"
+            f"✅ AI 요약 {total_pages}페이지 완료\n"
             "📄 PDF 생성 중..."
         )
 
@@ -168,9 +222,6 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await status_msg.edit_text(f"오류가 발생했습니다: {str(e)}\n/start로 다시 시도해 주세요.")
-        return ConversationHandler.END
-
-    return ConversationHandler.END
 
 
 async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -195,6 +246,7 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_script),
                 MessageHandler(filters.Document.TXT, receive_script),
             ],
+            WAIT_CONFIRM: [CommandHandler("continue", continue_anyway)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
