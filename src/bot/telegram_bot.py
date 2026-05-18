@@ -13,12 +13,11 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN, UPLOAD_DIR, OUTPUT_DIR
-from src.ai.script_validator import validate_script_match
 from src.mapping.page_mapper import map_script_to_pages, generate_page_summary
 from src.pdf.slide_extractor import extract_slide_texts
 from src.pdf.pdf_generator import generate_pdf
 
-WAIT_PDF, WAIT_SCRIPT, WAIT_CONFIRM = range(3)
+WAIT_PDF, WAIT_SCRIPT = range(2)
 
 user_sessions: dict[int, dict] = {}
 
@@ -86,87 +85,19 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
             f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
-            "2/3 대본-슬라이드 일치 확인 중..."
+            "2/3 대본-슬라이드 매핑 중 (Gemini)..."
         )
 
-        # 2단계: 대본 일치 확인
-        is_match, reason = await validate_script_match(slide_texts, raw_script)
-
-        if not is_match:
-            # 불일치 시 경고 후 계속할지 물어봄
-            user_sessions[user_id].update({
-                "raw_script": raw_script,
-                "slide_texts": slide_texts,
-                "total_pages": total_pages,
-                "status_msg_id": status_msg.message_id,
-            })
-            await status_msg.edit_text(
-                f"⚠️ 슬라이드와 대본이 다른 강의일 수 있습니다.\n"
-                f"사유: {reason}\n\n"
-                "그래도 계속 진행할까요?\n"
-                "계속하려면 /continue, 취소하려면 /cancel"
-            )
-            return WAIT_CONFIRM
-
-        # 일치하면 바로 다음 단계
-        user_sessions[user_id].update({
-            "raw_script": raw_script,
-            "slide_texts": slide_texts,
-            "total_pages": total_pages,
-        })
-        await status_msg.edit_text(
-            "⏳ 처리 중입니다...\n"
-            f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
-            "✅ 2/3 대본-슬라이드 일치 확인 완료\n"
-            "3/3 대본-슬라이드 매핑 중 (Gemini)..."
-        )
-
-        await process_mapping(update, ctx, user_id, status_msg)
-
-    except Exception as e:
-        await status_msg.edit_text(f"오류가 발생했습니다: {str(e)}\n/start로 다시 시도해 주세요.")
-        return ConversationHandler.END
-
-    return ConversationHandler.END
-
-
-async def continue_anyway(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id not in user_sessions:
-        await update.message.reply_text("세션이 만료됐습니다. /start로 다시 시작해주세요.")
-        return ConversationHandler.END
-
-    status_msg = await update.message.reply_text(
-        "⏳ 처리 중입니다...\n"
-        "✅ 슬라이드 추출 완료\n"
-        "✅ 일치 확인 (경고 무시)\n"
-        "대본-슬라이드 매핑 중 (Gemini)..."
-    )
-    user_sessions[user_id]["status_msg_id"] = status_msg.message_id
-
-    await process_mapping(update, ctx, user_id, status_msg)
-    return ConversationHandler.END
-
-
-async def process_mapping(update, ctx, user_id, status_msg):
-    session = user_sessions[user_id]
-    raw_script = session["raw_script"]
-    slide_texts = session["slide_texts"]
-    total_pages = session["total_pages"]
-    pdf_path = session["pdf_path"]
-
-    try:
-        # 매핑
+        # 2단계: 매핑
         mappings = await map_script_to_pages(slide_texts, raw_script)
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
-            "✅ 대본-슬라이드 매핑 완료\n"
-            f"AI 요약 생성 중... (0/{total_pages}페이지)"
+            f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
+            "✅ 2/3 대본-슬라이드 매핑 완료\n"
+            f"3/3 AI 요약 생성 중... (0/{total_pages}페이지)"
         )
 
-        # 요약 생성
+        # 3단계: 10페이지씩 요약
         summaries = []
         BATCH_SIZE = 10
 
@@ -186,17 +117,17 @@ async def process_mapping(update, ctx, user_id, status_msg):
 
             await status_msg.edit_text(
                 "⏳ 처리 중입니다...\n"
-                f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
-                "✅ 대본-슬라이드 매핑 완료\n"
-                f"AI 요약 생성 중... ({batch_end}/{total_pages}페이지 완료)"
+                f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
+                "✅ 2/3 대본-슬라이드 매핑 완료\n"
+                f"3/3 AI 요약 생성 중... ({batch_end}/{total_pages}페이지 완료)"
             )
 
         # PDF 생성
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            f"✅ 슬라이드 {total_pages}페이지 추출 완료\n"
-            "✅ 대본-슬라이드 매핑 완료\n"
-            f"✅ AI 요약 {total_pages}페이지 완료\n"
+            f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
+            "✅ 2/3 대본-슬라이드 매핑 완료\n"
+            f"✅ 3/3 AI 요약 {total_pages}페이지 완료\n"
             "📄 PDF 생성 중..."
         )
 
@@ -211,8 +142,9 @@ async def process_mapping(update, ctx, user_id, status_msg):
                 filename="강의_정리_노트.pdf",
                 caption=(
                     "📚 강의 정리 PDF입니다.\n"
-                    "빨간 강조: 대본 주요 내용\n"
-                    "파란 요약: AI 페이지별 요약"
+                    "🟢 초록: 필출/외워야 할 내용\n"
+                    "🔴 빨간: 중요 내용\n"
+                    "🔵 파란 요약: AI 페이지별 요약"
                 ),
             )
 
@@ -222,6 +154,9 @@ async def process_mapping(update, ctx, user_id, status_msg):
 
     except Exception as e:
         await status_msg.edit_text(f"오류가 발생했습니다: {str(e)}\n/start로 다시 시도해 주세요.")
+        return ConversationHandler.END
+
+    return ConversationHandler.END
 
 
 async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -246,7 +181,6 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_script),
                 MessageHandler(filters.Document.TXT, receive_script),
             ],
-            WAIT_CONFIRM: [CommandHandler("continue", continue_anyway)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
