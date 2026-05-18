@@ -78,15 +78,15 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text(
         "⏳ 처리 중입니다...\n"
-        "1/4 강의 대본 정제 중 (Gemini temperature=0)..."
+        "1/4 슬라이드별 대본 다듬는 중..."
     )
 
     try:
-        # 1단계: 대본 정제
+        # 1단계: 대본 다듬기
         refined = await refine_script(raw_script)
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 강의 대본 정제 완료\n"
+            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
             "2/4 슬라이드 텍스트 추출 중..."
         )
 
@@ -95,7 +95,7 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         total_pages = len(slide_texts)
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 강의 대본 정제 완료\n"
+            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
             f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
             "3/4 대본-슬라이드 매핑 중 (Gemini)..."
         )
@@ -104,7 +104,7 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         mappings = await map_script_to_pages(slide_texts, refined)
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 강의 대본 정제 완료\n"
+            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
             f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
             "✅ 3/4 대본-슬라이드 매핑 완료\n"
             f"4/4 AI 요약 생성 중... (0/{total_pages}페이지)"
@@ -130,7 +130,7 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await status_msg.edit_text(
                 "⏳ 처리 중입니다...\n"
-                "✅ 1/4 강의 대본 정제 완료\n"
+                "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
                 f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
                 "✅ 3/4 대본-슬라이드 매핑 완료\n"
                 f"4/4 AI 요약 생성 중... ({batch_end}/{total_pages}페이지 완료)"
@@ -139,7 +139,7 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 5단계: PDF 생성
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
-            "✅ 1/4 강의 대본 정제 완료\n"
+            "✅ 1/4 슬라이드별 대본 다듬기 완료\n"
             f"✅ 2/4 슬라이드 {total_pages}페이지 추출 완료\n"
             "✅ 3/4 대본-슬라이드 매핑 완료\n"
             f"✅ 4/4 AI 요약 {total_pages}페이지 완료\n"
