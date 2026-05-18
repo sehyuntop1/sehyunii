@@ -1,7 +1,10 @@
+import asyncio
 from config import GEMINI_REFINE_TEMPERATURE
 from src.ai.gemini_client import generate
 
-REFINE_PROMPT = """다음은 교수님의 강의 대본입니다. 아래 규칙에 따라 아주 가볍게만 다듬어 주세요.
+CHUNK_SIZE = 4000  # 한 번에 처리할 글자 수
+
+REFINE_PROMPT = """다음은 교수님의 강의 대본 일부입니다. 아래 규칙에 따라 아주 가볍게만 다듬어 주세요.
 
 규칙:
 1. 공지사항, 출석, 과제, 시험 일정 등 수업 운영 관련 잡소리만 제거합니다.
@@ -16,11 +19,42 @@ REFINE_PROMPT = """다음은 교수님의 강의 대본입니다. 아래 규칙�
 
 ---
 강의 대본:
-{raw_script}
+{chunk}
 ---
 """
 
 
+def split_into_chunks(text: str, chunk_size: int) -> list[str]:
+    """문단 경계 기준으로 청크 분할"""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        if end >= len(text):
+            chunks.append(text[start:])
+            break
+        # 청크 끝에서 가장 가까운 줄바꿈 찾기
+        newline = text.rfind("\n", start, end)
+        if newline > start:
+            end = newline
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
 async def refine_script(raw_script: str) -> str:
-    prompt = REFINE_PROMPT.format(raw_script=raw_script)
-    return await generate(prompt, GEMINI_REFINE_TEMPERATURE)
+    chunks = split_into_chunks(raw_script, CHUNK_SIZE)
+
+    # 청크가 1개면 그냥 바로 처리
+    if len(chunks) == 1:
+        prompt = REFINE_PROMPT.format(chunk=chunks[0])
+        return await generate(prompt, GEMINI_REFINE_TEMPERATURE)
+
+    # 여러 청크면 순차 처리 (병렬 X - 서버 부하 방지)
+    refined_chunks = []
+    for chunk in chunks:
+        prompt = REFINE_PROMPT.format(chunk=chunk)
+        result = await generate(prompt, GEMINI_REFINE_TEMPERATURE)
+        refined_chunks.append(result)
+
+    return "\n".join(refined_chunks)
