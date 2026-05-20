@@ -11,6 +11,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 from config import TELEGRAM_BOT_TOKEN, UPLOAD_DIR, OUTPUT_DIR
 from src.mapping.page_mapper import map_script_to_pages, generate_page_summary
@@ -171,7 +172,18 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def build_application() -> Application:
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    request = HTTPXRequest(
+        read_timeout=120,
+        write_timeout=120,
+        connect_timeout=60,
+        media_write_timeout=120,
+    )
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .request(request)
+        .build()
+    )
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
