@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import traceback
 
 from telegram import Update, Document
 from telegram.ext import (
@@ -154,7 +155,8 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         del user_sessions[user_id]
 
     except Exception as e:
-        await status_msg.edit_text(f"오류가 발생했습니다: {str(e)}\n/start로 다시 시도해 주세요.")
+        err_detail = traceback.format_exc()[-1000:]
+        await status_msg.edit_text(f"오류 발생:\n{err_detail}\n\n/start로 다시 시도해 주세요.")
         return ConversationHandler.END
 
     return ConversationHandler.END
