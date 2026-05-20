@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from src.bot.telegram_bot import build_application
 
@@ -7,8 +8,13 @@ logging.basicConfig(
 )
 
 
+async def clear_webhook(app):
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+
 def main():
     app = build_application()
+    asyncio.get_event_loop().run_until_complete(clear_webhook(app))
     print("봇 시작! Ctrl+C로 종료하세요.")
     app.run_polling(drop_pending_updates=True)
 
