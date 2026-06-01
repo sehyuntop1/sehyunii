@@ -1,7 +1,7 @@
-python-telegram-bot
-google-genai
-PyMuPDF
-reportlab
-Pillow
-python-dotenv
-aiofiles
+python-telegram-bot==20.7
+google-generativeai>=0.8.0
+PyMuPDF==1.24.2
+reportlab==4.1.0
+Pillow==10.3.0
+python-dotenv==1.0.1
+aiofiles==23.2.1
