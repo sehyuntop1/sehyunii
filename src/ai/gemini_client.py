@@ -1,19 +1,26 @@
 import asyncio
-from google import genai
-from google.genai import types
+import random
+import google.generativeai as genai
 from config import GEMINI_API_KEY
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+
+MAX_RETRIES = 10
 
 
-async def generate(prompt: str, temperature: float, max_retries: int = 5) -> str:
-    for attempt in range(max_retries):
+def get_model(temperature: float) -> genai.GenerativeModel:
+    return genai.GenerativeModel(
+        model_name="gemini-1.5-pro",
+        generation_config=genai.GenerationConfig(temperature=temperature),
+    )
+
+
+async def generate(prompt: str, temperature: float) -> str:
+    model = get_model(temperature)
+
+    for attempt in range(MAX_RETRIES):
         try:
-            response = await client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=temperature),
-            )
+            response = await model.generate_content_async(prompt)
             return response.text
 
         except Exception as e:
@@ -23,11 +30,14 @@ async def generate(prompt: str, temperature: float, max_retries: int = 5) -> str
                 "504" in err_str or
                 "UNAVAILABLE" in err_str or
                 "CANCELLED" in err_str or
-                "429" in err_str
+                "429" in err_str or
+                "overloaded" in err_str.lower() or
+                "high demand" in err_str.lower()
             )
-            if is_retryable and attempt < max_retries - 1:
-                wait = 2 ** attempt  # 1초 → 2초 → 4초 → 8초
-                await asyncio.sleep(wait)
+            if is_retryable and attempt < MAX_RETRIES - 1:
+                base_wait = min(2 ** attempt, 60)
+                jitter = random.uniform(0, base_wait * 0.3)
+                await asyncio.sleep(base_wait + jitter)
                 continue
             else:
                 raise
