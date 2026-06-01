@@ -178,7 +178,6 @@ def build_application() -> Application:
         read_timeout=120,
         write_timeout=120,
         connect_timeout=60,
-        media_write_timeout=120,
     )
     app = (
         Application.builder()
