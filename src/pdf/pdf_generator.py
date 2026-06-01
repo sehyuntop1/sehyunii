@@ -18,40 +18,10 @@ from reportlab.platypus import (
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+from config import EMPHASIS_PHRASES
+
 PAGE_W, PAGE_H = A4
 MARGIN = 15 * mm
-
-# ── 초록 (최상위: 외워라 / 시험 필출) ──────────────────────────────
-GREEN_PATTERNS = [
-    r"외워\S*",
-    r"외우세요",
-    r"외우\S+",
-    r"시험에\s*(?:꼭|반드시|무조건)?\s*(?:나와|낼|나온|나옵|출제)",
-    r"시험\s*문제",
-    r"필출",
-    r"출제\s*(?:될|예정|합니다|해|돼)",
-    r"반드시\s*기억",
-    r"꼭\s*기억",
-]
-
-# ── 빨간 (중요 뉘앙스) ────────────────────────────────────────────
-RED_PATTERNS = [
-    r"중요\S*",
-    r"기억하\S+",
-    r"기억해\S*",
-    r"알아두\S*",
-    r"알고\s*있어야",
-    r"포인트\S*",
-    r"핵심\S*",
-    r"강조\S*",
-    r"주목\S*",
-    r"놓치지\s*마",
-    r"반드시\s*알",
-    r"꼭\s*알",
-]
-
-_GREEN_RE = re.compile("(" + "|".join(GREEN_PATTERNS) + ")", re.IGNORECASE)
-_RED_RE   = re.compile("(" + "|".join(RED_PATTERNS) + ")", re.IGNORECASE)
 
 _FONT_REGISTERED = False
 
@@ -60,24 +30,16 @@ def _register_korean_font():
     global _FONT_REGISTERED
     if _FONT_REGISTERED:
         return
-
-    base_dir = Path(__file__).resolve().parent.parent.parent
     font_candidates = [
-        base_dir / "fonts" / "NanumGothic.ttf",
-        base_dir / "fonts" / "NanumGothicBold.ttf",
-        Path("C:/Windows/Fonts/malgun.ttf"),
-        Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
-
     for path in font_candidates:
-        if path.exists():
-            try:
-                pdfmetrics.registerFont(TTFont("KoreanFont", str(path)))
-                _FONT_REGISTERED = True
-                return
-            except:
-                continue
-
+        if Path(path).exists():
+            pdfmetrics.registerFont(TTFont("KoreanFont", path))
+            _FONT_REGISTERED = True
+            return
     _FONT_REGISTERED = False
 
 
@@ -117,65 +79,29 @@ def _get_styles() -> dict:
     return {"script": script_style, "summary": summary_style, "label": label_style}
 
 
-def _apply_highlights(text: str) -> str:
-    """
-    초록(필출/외워) > 빨간(중요 뉘앙스) 순으로 우선순위.
-    겹치는 구간은 초록이 이김.
-    """
-    # (start, end, color) 목록 수집
-    matches = []
-
-    for m in _GREEN_RE.finditer(text):
-        matches.append((m.start(), m.end(), "green"))
-    for m in _RED_RE.finditer(text):
-        matches.append((m.start(), m.end(), "red"))
-
-    if not matches:
-        return text
-
-    # start 기준 정렬, 겹치면 green 우선 / 긴 것 우선
-    matches.sort(key=lambda x: (x[0], x[1] == "red", -(x[1] - x[0])))
-
-    # 겹치는 구간 제거
-    merged = []
-    last_end = -1
-    for start, end, color in matches:
-        if start >= last_end:
-            merged.append((start, end, color))
-            last_end = end
-        elif color == "green" and merged and merged[-1][2] == "red":
-            # 초록이 빨간 위에 있으면 빨간 제거하고 초록으로 교체
-            merged.pop()
-            merged.append((start, end, color))
-            last_end = end
-
-    # 문자열 재조립
-    result = ""
-    prev = 0
-    for start, end, color in merged:
-        result += text[prev:start]
-        word = text[start:end]
-        if color == "green":
-            result += f'<font color="#1e8449"><b>{word}</b></font>'
-        else:
-            result += f'<font color="red"><b>{word}</b></font>'
-        prev = end
-    result += text[prev:]
-    return result
-
-
 def _highlight_emphasis(text: str, style: ParagraphStyle) -> list:
+    """Split text into Paragraphs, coloring emphasis phrases red."""
+    pattern = "(" + "|".join(re.escape(p) for p in EMPHASIS_PHRASES) + ")"
+    segments = re.split(pattern, text)
+
+    base = "KoreanFont" if _FONT_REGISTERED else "Helvetica"
     paragraphs = []
-    for line in text.split("\n"):
+    current = ""
+    for seg in segments:
+        if any(seg == p for p in EMPHASIS_PHRASES):
+            current += f'<font color="red"><b>{seg}</b></font>'
+        else:
+            current += seg
+
+    for line in current.split("\n"):
         line = line.strip()
         if line:
-            highlighted = _apply_highlights(line)
-            paragraphs.append(Paragraph(highlighted, style))
+            paragraphs.append(Paragraph(line, style))
     return paragraphs
 
 
 def _slide_to_image(page: fitz.Page, max_width: float) -> RLImage | None:
-    mat = fitz.Matrix(2, 2)
+    mat = fitz.Matrix(1.2, 1.2)  # 2x → 1.2x로 낮춰 용량 절감
     pix = page.get_pixmap(matrix=mat)
     img_data = pix.tobytes("png")
 
@@ -184,8 +110,10 @@ def _slide_to_image(page: fitz.Page, max_width: float) -> RLImage | None:
     scale = min(max_width / w, (PAGE_H * 0.4) / h)
     new_w, new_h = int(w * scale), int(h * scale)
 
+    # JPEG 압축으로 PNG 대비 파일 크기 대폭 절감
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=72, optimize=True)
     buf.seek(0)
     return RLImage(buf, width=new_w, height=new_h)
 
@@ -228,7 +156,7 @@ def generate_pdf(
 
         if summary_text:
             story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aed6f1")))
-            story.append(Paragraph("🔵 AI 페이지별 요약", styles["label"]))
+            story.append(Paragraph("🤖 AI 요약 · 해석", styles["label"]))
             for line in summary_text.split("\n"):
                 line = line.strip()
                 if line:
