@@ -1,6 +1,5 @@
-import asyncio
-from config import GEMINI_REFINE_TEMPERATURE
-from src.ai.gemini_client import generate
+from config import OPENAI_REASONING_REFINEMENT
+from src.ai.openai_client import generate
 
 CHUNK_SIZE = 4000  # 한 번에 처리할 글자 수
 
@@ -48,13 +47,13 @@ async def refine_script(raw_script: str) -> str:
     # 청크가 1개면 그냥 바로 처리
     if len(chunks) == 1:
         prompt = REFINE_PROMPT.format(chunk=chunks[0])
-        return await generate(prompt, GEMINI_REFINE_TEMPERATURE)
+        return await generate(prompt, OPENAI_REASONING_REFINEMENT)
 
     # 여러 청크면 순차 처리 (병렬 X - 서버 부하 방지)
     refined_chunks = []
     for chunk in chunks:
         prompt = REFINE_PROMPT.format(chunk=chunk)
-        result = await generate(prompt, GEMINI_REFINE_TEMPERATURE)
+        result = await generate(prompt, OPENAI_REASONING_REFINEMENT)
         refined_chunks.append(result)
 
     return "\n".join(refined_chunks)

@@ -1,7 +1,7 @@
 import json
 import re
-from config import GEMINI_MAPPING_TEMPERATURE, GEMINI_SUMMARY_TEMPERATURE
-from src.ai.gemini_client import generate
+from config import OPENAI_REASONING_MAPPING, OPENAI_REASONING_SUMMARY
+from src.ai.openai_client import generate
 
 MAPPING_PROMPT = """당신은 강의 대본과 슬라이드를 매핑하는 전문가입니다.
 아래 슬라이드 내용과 강의 대본을 보고, 각 슬라이드 페이지에 해당하는 대본 내용을 매핑해주세요.
@@ -58,7 +58,7 @@ def _parse_slide_markers(script: str, total_pages: int) -> list[dict] | None:
     ]
 
 
-async def _gemini_mapping_chunked(
+async def _openai_mapping_chunked(
     slide_texts: list[str], script: str
 ) -> list[dict]:
     """
@@ -82,7 +82,7 @@ async def _gemini_mapping_chunked(
             slide_contents=slide_contents,
             refined_script=script_trimmed,
         )
-        response = await generate(prompt, GEMINI_MAPPING_TEMPERATURE)
+        response = await generate(prompt, OPENAI_REASONING_MAPPING)
 
         mapping = []
         for pattern in [
@@ -119,13 +119,13 @@ async def _gemini_mapping_chunked(
 async def map_script_to_pages(
     slide_texts: list[str], refined_script: str
 ) -> list[dict]:
-    # 1순위: [슬라이드 N] 마커 직접 파싱 (Gemini 호출 없음)
+    # 1순위: [슬라이드 N] 마커 직접 파싱 (AI 호출 없음)
     parsed = _parse_slide_markers(refined_script, len(slide_texts))
     if parsed:
         return parsed
 
-    # 2순위: 청크 단위 Gemini 매핑
-    return await _gemini_mapping_chunked(slide_texts, refined_script)
+    # 2순위: 청크 단위 GPT-5.6 Luna 매핑
+    return await _openai_mapping_chunked(slide_texts, refined_script)
 
 
 async def generate_page_summary(
@@ -136,4 +136,4 @@ async def generate_page_summary(
         slide_text=slide_text,
         script_text=script_text,
     )
-    return await generate(prompt, GEMINI_SUMMARY_TEMPERATURE)
+    return await generate(prompt, OPENAI_REASONING_SUMMARY)

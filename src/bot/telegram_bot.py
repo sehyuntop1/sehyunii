@@ -87,7 +87,7 @@ async def receive_script(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(
             "⏳ 처리 중입니다...\n"
             f"✅ 1/3 슬라이드 {total_pages}페이지 추출 완료\n"
-            "2/3 대본-슬라이드 매핑 중 (Gemini)..."
+            "2/3 대본-슬라이드 매핑 중 (GPT-5.6 Luna)..."
         )
 
         # 2단계: 매핑
